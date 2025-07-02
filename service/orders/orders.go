@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
-
-	"log/slog"
 
 	"github.com/romshark/demo-event-sourced-monolith/database"
 	"github.com/romshark/demo-event-sourced-monolith/event"
