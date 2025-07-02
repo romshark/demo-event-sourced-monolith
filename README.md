@@ -10,7 +10,7 @@ of the entire system. Everything else is just a projection
 
 # Domain Model
 
-This demo tries to model a simple domain or order and product stock management.
+This demo tries to model a simple domain of order and product stock management.
 It keeps an inventory of products, allows orders to be placed and makes sure an order
 can't be placed if not enough stock is available (invariant). When an order is
 either placed or canceled, a confirmation email is sent.
