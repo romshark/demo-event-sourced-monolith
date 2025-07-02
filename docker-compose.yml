@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: demo
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "demo" ]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+
+  app:
+    image: golang:1.24-alpine
+    working_dir: /app/cmd/server
+    volumes:
+      - .:/app
+    ports:
+      - "9090:9090"
+    environment:
+      PGDSN: "postgres://demo:demo@db:5432/demo?sslmode=disable"
+      DEBUG: "false"
+      HOST: "0.0.0.0:9090" # bind to all interfaces
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - go
+      - run
+      - .
+      - -host
+      - "${HOST}"
+      - -debug
+      - "${DEBUG}"

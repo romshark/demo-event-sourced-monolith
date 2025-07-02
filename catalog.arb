@@ -1,0 +1,13 @@
+{
+	"@@locale": "en",
+	"examplemsg": "{var0, date, full}",
+	"@examplemsg": {
+		"type": "text",
+        "placeholders": {
+            "var0": {
+                "type": "DateTime",
+                "isCustomDateFormat": true
+            }
+        }
+	}
+}
