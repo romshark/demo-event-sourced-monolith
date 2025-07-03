@@ -32,7 +32,8 @@ func testRnd(series ...float64) backoff.RandReader { return &FakeRndSrc{Series: 
 
 func TestDuration(t *testing.T) {
 	f := func(t *testing.T, expect []time.Duration,
-		min, max time.Duration, factor, jitter float64, rand backoff.RandReader) {
+		min, max time.Duration, factor, jitter float64, rand backoff.RandReader,
+	) {
 		t.Helper()
 		b, err := backoff.New(min, max, factor, jitter, rand)
 		require.NoError(t, err)
