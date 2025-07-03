@@ -26,7 +26,13 @@ type MockSynchronizer struct {
 
 func (m *MockSynchronizer) ProjectionID() int32 { return m.projectionID }
 
-func (m *MockSynchronizer) Sync(
+func (m *MockSynchronizer) Backoff() (min, max time.Duration, factor, jitter float64) {
+	min, max = 50*time.Millisecond, 500*time.Millisecond
+	factor, jitter = 2.0, 0
+	return
+}
+
+func (m *MockSynchronizer) Apply(
 	ctx context.Context, e event.Event, tx *database.Tx,
 ) error {
 	defer m.WG.Done()
@@ -50,6 +56,12 @@ func (m *MockHandler) Handle(ctx context.Context, version int64, e event.Event) 
 	m.ReceivedVersions = append(m.ReceivedVersions, version)
 	m.ReceivedEvent = append(m.ReceivedEvent, e)
 	return m.returnErr
+}
+
+func (m *MockHandler) Backoff() (min, max time.Duration, factor, jitter float64) {
+	min, max = 50*time.Millisecond, 500*time.Millisecond
+	factor, jitter = 2.0, 0
+	return
 }
 
 func TestOrchestrator(t *testing.T) {

@@ -26,7 +26,13 @@ func New(log *slog.Logger, db database.Database) *Service {
 
 func (s *Service) ProjectionID() int32 { return 0 }
 
-func (s *Service) Sync(ctx context.Context, e event.Event, tx *database.Tx) error {
+func (m *Service) Backoff() (min, max time.Duration, factor, jitter float64) {
+	min, max = 30*time.Millisecond, 10*time.Second
+	factor, jitter = 2.0, 0.1
+	return
+}
+
+func (s *Service) Apply(ctx context.Context, e event.Event, tx *database.Tx) error {
 	switch e := e.(type) {
 	case *event.EventRegisterProduct:
 		s.log.Info("applying event RegisterProduct")

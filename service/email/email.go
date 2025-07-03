@@ -20,6 +20,12 @@ func New(log *slog.Logger) *Service {
 
 func (s *Service) ProjectionID() int32 { return 1 }
 
+func (m *Service) Backoff() (min, max time.Duration, factor, jitter float64) {
+	min, max = time.Second, 60*time.Second
+	factor, jitter = 2.0, 0.3
+	return
+}
+
 func (s *Service) Handle(ctx context.Context, version int64, e event.Event) error {
 	// This service just simulates sending emails.
 	switch e := e.(type) {
