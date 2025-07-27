@@ -1,0 +1,12 @@
+{
+    "go.buildFlags": [
+        // Version control system info is required by Conductor.
+        "-buildvcs"
+    ],
+    "go.testFlags": [
+        "-race",
+        "-coverpkg=./...",
+        "-v"
+    ],
+    "go.formatTool": "gofumpt",
+}

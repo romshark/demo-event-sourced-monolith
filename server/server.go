@@ -46,7 +46,7 @@ func (s *Server) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 	type OrderItem struct {
 		ProductID   int64  `json:"product_id"`
 		ProductName string `json:"product_name"`
-		Amount      int64  `json:"amount"`
+		Amount      int32  `json:"amount"`
 	}
 	type Order struct {
 		ID            int64       `json:"id"`
@@ -95,7 +95,7 @@ func (s *Server) handleDeleteOrders(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	type reqItem struct {
 		ProductID int64 `json:"product_id"`
-		Amount    int64 `json:"amount"`
+		Amount    int32 `json:"amount"`
 	}
 	var req struct {
 		DeliveryAddress string    `json:"deliveryAddress"`

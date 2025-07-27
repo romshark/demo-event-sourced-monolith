@@ -9,18 +9,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/romshark/demo-event-sourced-monolith/database"
+	"github.com/romshark/conductor"
+	"github.com/romshark/conductor/db"
+	"github.com/romshark/conductor/db/dbpgx"
 	"github.com/romshark/demo-event-sourced-monolith/event"
-	"github.com/romshark/demo-event-sourced-monolith/pkg/orchestrator"
 )
 
 type Service struct {
 	log          *slog.Logger
-	db           database.Database
-	orchestrator *orchestrator.Orchestrator
+	db           *dbpgx.DB
+	orchestrator *conductor.Conductor
 }
 
-func New(log *slog.Logger, db database.Database) *Service {
+var _ conductor.StatelessProcessor = new(Service)
+
+func New(log *slog.Logger, db *dbpgx.DB) *Service {
 	return &Service{log: log, db: db}
 }
 
@@ -32,7 +35,8 @@ func (m *Service) Backoff() (min, max time.Duration, factor, jitter float64) {
 	return
 }
 
-func (s *Service) Apply(ctx context.Context, e event.Event, tx *database.Tx) error {
+func (s *Service) Process(ctx context.Context, e conductor.Event, dbtx db.TxRW) error {
+	tx := dbtx.(*dbpgx.Tx)
 	switch e := e.(type) {
 	case *event.EventRegisterProduct:
 		s.log.Info("applying event RegisterProduct")
@@ -54,17 +58,17 @@ func (s *Service) Apply(ctx context.Context, e event.Event, tx *database.Tx) err
 }
 
 func (s *Service) applyRegisterProduct(
-	ctx context.Context, e *event.EventRegisterProduct, tx *database.Tx,
+	ctx context.Context, e *event.EventRegisterProduct, tx *dbpgx.Tx,
 ) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO service_orders.products (id, name, stock_amount)
-		VALUES ($1, $2, 0)
-	`, e.ID, e.Name)
+		INSERT INTO service_orders.products (id, name, description, stock_amount, sku)
+		VALUES ($1, $2, $3, 0, $4)
+	`, e.ID, e.ProductName, e.Description, e.SKU)
 	return err
 }
 
 func (s *Service) applyEditProductStock(
-	ctx context.Context, e *event.EventEditProductStock, tx *database.Tx,
+	ctx context.Context, e *event.EventEditProductStock, tx *dbpgx.Tx,
 ) error {
 	tag, err := tx.Exec(ctx, `
 		UPDATE service_orders.products
@@ -83,7 +87,7 @@ func (s *Service) applyEditProductStock(
 var ErrDeliveryAddressEmpty = errors.New("empty delivery address")
 
 func (s *Service) applyPlaceOrder(
-	ctx context.Context, e *event.EventPlaceOrder, tx *database.Tx,
+	ctx context.Context, e *event.EventPlaceOrder, tx *dbpgx.Tx,
 ) error {
 	if strings.TrimSpace(e.DeliveryAddress) == "" {
 		return ErrDeliveryAddressEmpty
@@ -98,7 +102,7 @@ func (s *Service) applyPlaceOrder(
 		}
 		productsByID[i.ProductID] = struct{}{}
 
-		var avail int64
+		var avail int32
 		if err := tx.QueryRow(ctx, `
 			SELECT stock_amount
 			FROM service_orders.products
@@ -124,9 +128,11 @@ func (s *Service) applyPlaceOrder(
 	// Insert each order_item and decrement stock.
 	for _, i := range e.Items {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO service_orders.order_items (order_id, product_id, amount)
-			VALUES ($1, $2, $3)
-		`, e.ID, i.ProductID, i.Amount); err != nil {
+			INSERT INTO service_orders.order_items (
+				order_id, product_id, amount, price_currency, price_min_units
+			)
+			VALUES ($1, $2, $3, $4, $5)
+		`, e.ID, i.ProductID, i.Amount, i.Price.Currency, i.Price.MinUnits); err != nil {
 			return fmt.Errorf("insert order_item for order %d, product %d: %w",
 				e.ID, i.ProductID, err)
 		}
@@ -143,7 +149,7 @@ func (s *Service) applyPlaceOrder(
 }
 
 func (s *Service) applyCancelOrder(
-	ctx context.Context, e *event.EventCancelOrder, tx *database.Tx,
+	ctx context.Context, e *event.EventCancelOrder, tx *dbpgx.Tx,
 ) error {
 	// Ensure order exists.
 	var exists bool
@@ -211,7 +217,7 @@ func (s *Service) applyCancelOrder(
 }
 
 func (s *Service) applyEditOrder(
-	ctx context.Context, e *event.EventEditOrder, tx *database.Tx,
+	ctx context.Context, e *event.EventEditOrder, tx *dbpgx.Tx,
 ) error {
 	// Ensure order exists.
 	var exists bool
@@ -242,11 +248,13 @@ type Product struct {
 	ID          int64
 	Name        string
 	StockAmount int64
+	Description string
+	SKU         string
 }
 
 func (s *Service) GetProducts(ctx context.Context) ([]Product, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, name, stock_amount FROM service_orders.products
+		SELECT id, name, stock_amount, description, sku FROM service_orders.products
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("querying products: %w", err)
@@ -255,7 +263,8 @@ func (s *Service) GetProducts(ctx context.Context) ([]Product, error) {
 	var out []Product
 	for rows.Next() {
 		var p Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.StockAmount); err != nil {
+		err := rows.Scan(&p.ID, &p.Name, &p.StockAmount, &p.Description, &p.SKU)
+		if err != nil {
 			return nil, fmt.Errorf("scan product: %w", err)
 		}
 		out = append(out, p)
@@ -270,9 +279,11 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ProductID   int64
-	ProductName string
-	Amount      int64
+	ProductID     int64
+	ProductName   string
+	Amount        int32
+	PriceCurrency string
+	PriceMinUnits int64
 }
 
 func (s *Service) GetStandingOrders(ctx context.Context) ([]Order, error) {
@@ -282,7 +293,9 @@ func (s *Service) GetStandingOrders(ctx context.Context) ([]Order, error) {
 			o.placement_time,
 			oi.product_id,
 			p.name,
-			oi.amount
+			oi.amount,
+			oi.price_currency,
+			oi.price_min_units
 		FROM service_orders.orders o
 		JOIN service_orders.order_items oi ON o.id = oi.id
 		JOIN service_orders.products p ON oi.product_id = p.id
@@ -302,22 +315,29 @@ func (s *Service) GetStandingOrders(ctx context.Context) ([]Order, error) {
 	var rowsData []interim
 	for rows.Next() {
 		var (
-			oid           int64
+			orderID       int64
 			placementTime time.Time
-			pid           int64
-			name          string
-			amt           int64
+			productID     int64
+			productName   string
+			amount        int32
+			priceCurr     string
+			priceMinUnits int64
 		)
-		if err := rows.Scan(&oid, &placementTime, &pid, &name, &amt); err != nil {
+		if err := rows.Scan(
+			&orderID, &placementTime, &productID, &productName,
+			&amount, priceCurr, priceMinUnits,
+		); err != nil {
 			return nil, fmt.Errorf("scan order row: %w", err)
 		}
 		rowsData = append(rowsData, interim{
-			id:            oid,
+			id:            orderID,
 			placementTime: placementTime,
 			item: OrderItem{
-				ProductID:   pid,
-				ProductName: name,
-				Amount:      amt,
+				ProductID:     productID,
+				ProductName:   productName,
+				Amount:        amount,
+				PriceCurrency: priceCurr,
+				PriceMinUnits: priceMinUnits,
 			},
 		})
 	}
@@ -362,28 +382,28 @@ func (s *Service) PlaceOrder(
 
 	now := time.Now()
 	id = now.Unix()
-	_, err = s.orchestrator.Publish(ctx, event.New(now, &event.EventPlaceOrder{
+	_, err = s.orchestrator.SyncAppend(ctx, s.log, &event.EventPlaceOrder{
 		ID:              id,
 		UserID:          1,
 		Items:           orderItems,
 		DeliveryAddress: deliveryAddress,
-	}))
+	})
 	return id, err
 }
 
 func (s *Service) CancelOrder(ctx context.Context, id int64) (err error) {
-	_, err = s.orchestrator.Publish(ctx, event.New(time.Now(), &event.EventCancelOrder{
+	_, err = s.orchestrator.SyncAppend(ctx, s.log, &event.EventCancelOrder{
 		ID: id,
-	}))
+	})
 	return err
 }
 
 func (s *Service) EditOrder(
 	ctx context.Context, id int64, deliveryAddress string,
 ) (err error) {
-	_, err = s.orchestrator.Publish(ctx, event.New(time.Now(), &event.EventEditOrder{
+	_, err = s.orchestrator.SyncAppend(ctx, s.log, &event.EventEditOrder{
 		ID:              id,
 		DeliveryAddress: deliveryAddress,
-	}))
+	})
 	return err
 }

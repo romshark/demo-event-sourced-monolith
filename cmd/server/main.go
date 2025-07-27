@@ -10,9 +10,10 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
+	"github.com/romshark/conductor"
 	"github.com/romshark/demo-event-sourced-monolith/database"
-	"github.com/romshark/demo-event-sourced-monolith/pkg/orchestrator"
 	"github.com/romshark/demo-event-sourced-monolith/server"
 	"github.com/romshark/demo-event-sourced-monolith/service/email"
 	"github.com/romshark/demo-event-sourced-monolith/service/orders"
@@ -37,23 +38,18 @@ func main() {
 		panic("missing env var PGDSN")
 	}
 
-	db, err := database.Open(ctx, log, os.Getenv("PGDSN"), 0)
-	if err != nil {
-		panic(err)
-	}
+	db := database.MustOpen(ctx, log, os.Getenv("PGDSN"))
 	defer db.Close()
 
 	serviceOrders := orders.New(log, db)
 	serviceEmail := email.New(log)
 
-	orchestrator, err := orchestrator.Make(
-		ctx, db,
-		[]orchestrator.ProjectionSynchronizer{
-			serviceOrders,
-		},
-		[]orchestrator.Handler{
-			serviceEmail,
-		})
+	orchestrator, err := conductor.Make(
+		ctx, conductor.DefaultEventCodec, log, db,
+		[]conductor.StatelessProcessor{serviceOrders},
+		nil,
+		[]conductor.Reactor{serviceEmail},
+	)
 	if err != nil {
 		panic(fmt.Errorf("initializing orchestrator: %w", err))
 	}
@@ -71,21 +67,23 @@ func main() {
 	defer cancel()
 
 	wg.Add(1)
-	go func() {
+	go func() { // Listen for database notifications.
 		defer wg.Done()
-		if err := orchestrator.RunHandlerDispatcher(ctx, log); err != nil {
+		poll := conductor.NewTickingPoller(10 * time.Second)
+		onReady := func() {}
+		queueLen := 1024
+		if err := orchestrator.Listen(
+			context.Background(), ctx, log, poll, queueLen, onReady,
+		); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error("running orchestrator dispatcher", slog.Any("err", err))
 			}
 		}
 		log.Info("orchestrator dispatcher stopped")
-
-		// Wait for the orchestrator to finish its asynchronous tasks.
-		orchestrator.Wait()
 	}()
 
 	wg.Add(1)
-	go func() {
+	go func() { // Serve HTTP
 		defer wg.Done()
 		log.Info("listening", slog.String("host", *fHost))
 		err := httpServer.ListenAndServe()

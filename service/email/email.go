@@ -5,12 +5,16 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/romshark/conductor"
+	"github.com/romshark/conductor/db"
 	"github.com/romshark/demo-event-sourced-monolith/event"
 )
 
 type Service struct {
 	log *slog.Logger
 }
+
+var _ conductor.Reactor = new(Service)
 
 func New(log *slog.Logger) *Service {
 	return &Service{
@@ -26,7 +30,9 @@ func (m *Service) Backoff() (min, max time.Duration, factor, jitter float64) {
 	return
 }
 
-func (s *Service) Handle(ctx context.Context, version int64, e event.Event) error {
+func (s *Service) React(
+	ctx context.Context, version int64, e conductor.Event, tx db.TxReadOnly,
+) error {
 	// This service just simulates sending emails.
 	switch e := e.(type) {
 	case *event.EventPlaceOrder:

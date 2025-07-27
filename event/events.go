@@ -1,75 +1,73 @@
 package event
 
-/*** REGISTRY ***/
+import "github.com/romshark/conductor"
 
-var byTypeName = map[string]func() Event{
-	"RegisterProduct":  func() (e Event) { return &EventRegisterProduct{} },
-	"EditProductStock": func() (e Event) { return &EventEditProductStock{} },
-	"PlaceOrder":       func() (e Event) { return &EventPlaceOrder{} },
-	"EditOrder":        func() (e Event) { return &EventEditOrder{} },
-	"CancelOrder":      func() (e Event) { return &EventCancelOrder{} },
-	"CompleteOrder":    func() (e Event) { return &EventCompleteOrder{} },
+func init() {
+	conductor.MustRegisterEventType[*EventRegisterProduct]("register-product")
+	conductor.MustRegisterEventType[*EventEditProductStock]("edit-product-stock")
+	conductor.MustRegisterEventType[*EventPlaceOrder]("place-order")
+	conductor.MustRegisterEventType[*EventEditOrder]("edit-order")
+	conductor.MustRegisterEventType[*EventCancelOrder]("cancel-order")
+	conductor.MustRegisterEventType[*EventCompleteOrder]("complete-order")
 }
-
-/*** EVENT TYPES ***/
 
 type EventRegisterProduct struct {
-	event
+	conductor.EventMetadata
 
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID          int64  `json:"id,string"`
+	ProductName string `json:"product-name"`
+	Description string `json:"description,omitempty"`
+	SKU         string `json:"sku,omitempty"`
 }
 
-func (EventRegisterProduct) typeName() string { return "RegisterProduct" }
-
 type EventEditProductStock struct {
-	event
+	conductor.EventMetadata
 
-	ProductID int64 `json:"product_id"`
+	ProductID int64 `json:"product_id,string"`
 	Stock     int   `json:"stock"`
 }
 
-func (EventEditProductStock) typeName() string { return "EditProductStock" }
-
 type EventPlaceOrder struct {
-	event
+	conductor.EventMetadata
 
-	ID              int64       `json:"id"`
-	UserID          int64       `json:"user_id"`
+	ID              int64       `json:"id,string"`
+	UserID          int64       `json:"user_id,string"`
 	Items           []OrderItem `json:"items"`
 	DeliveryAddress string      `json:"delivery_address"`
 }
 
-type OrderItem struct {
-	ProductID int64 `json:"product_id"`
-	Amount    int64 `json:"amount"`
+type Price struct {
+	// Currency is an ISO 4217 3-letter code.
+	Currency string `json:"currency"`
+
+	// MinUnits is the amount in minor units (cents, pence, fils, etc.),
+	// sent as a JSON string to avoid JS/JSON precision loss.
+	MinUnits int64 `json:"min_units,string"`
 }
 
-func (EventPlaceOrder) typeName() string { return "PlaceOrder" }
+type OrderItem struct {
+	ProductID int64 `json:"product_id,string"`
+	Amount    int32 `json:"amount"`
+	Price     Price `json:"price"`
+}
 
 type EventEditOrder struct {
-	event
+	conductor.EventMetadata
 
-	ID int64 `json:"id"`
+	ID int64 `json:"id,string"`
 
 	// DeliveryAddress is "" if unchanged.
 	DeliveryAddress string `json:"delivery_address"`
 }
 
-func (EventEditOrder) typeName() string { return "EditOrder" }
-
 type EventCancelOrder struct {
-	event
+	conductor.EventMetadata
 
-	ID int64 `json:"id"`
+	ID int64 `json:"id,string"`
 }
-
-func (EventCancelOrder) typeName() string { return "CancelOrder" }
 
 type EventCompleteOrder struct {
-	event
+	conductor.EventMetadata
 
-	ID int64 `json:"id"`
+	ID int64 `json:"id,string"`
 }
-
-func (EventCompleteOrder) typeName() string { return "CompleteOrder" }
